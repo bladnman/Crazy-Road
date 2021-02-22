@@ -41,7 +41,9 @@
 				F99E507B25E3475C0040FD6C /* Crazy Road */,
 				F99E507A25E3475C0040FD6C /* Products */,
 			);
+			indentWidth = 2;
 			sourceTree = "<group>";
+			tabWidth = 2;
 		};
 		F99E507A25E3475C0040FD6C /* Products */ = {
 			isa = PBXGroup;
