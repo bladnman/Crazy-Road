@@ -11,8 +11,25 @@ enum LaneType {
   case grass, road
 }
 
+class TrafficNode: SCNNode {
+  
+  let type: Int
+  let directionRight: Bool
+  
+  init(type: Int, directionRight: Bool) {
+    self.type = type
+    self.directionRight = directionRight
+    super.init()
+  }
+  
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+}
+
 class LaneNode: SCNNode {
   let type: LaneType
+  var trafficNode: TrafficNode?
 
   init(type: LaneType, width: CGFloat) {
     self.type = type
@@ -29,6 +46,8 @@ class LaneNode: SCNNode {
       guard let texture = UIImage(named: "art.scnassets/asphalt.png") else {
         break
       }
+      trafficNode = TrafficNode(type: roll(3)-1, directionRight: flipIsHeads())
+      addChildNode(trafficNode!)
       createLane(width: width, height: 0.05, image: texture)
     }
   }
@@ -46,6 +65,9 @@ class LaneNode: SCNNode {
   }
   
   func addElement(_ width: CGFloat, _ laneNode: SCNNode) {
+    
+    var carGap = 0
+    
     for index in 0..<Int(width) {
       if type == .grass {
         if chance(20) {
@@ -54,13 +76,36 @@ class LaneNode: SCNNode {
           laneNode.addChildNode(vegitation)
         }
       } else if type == .road {
-        
+        carGap += 1
+        if carGap > 3 {
+          guard let trafficNode = trafficNode else {
+            continue
+          }
+          if chance(25) {
+            carGap = 0
+            let vehicle = getVehicle(for: trafficNode.type)
+            vehicle.position = SCNVector3(10 - Float(index), 0, 0)
+            vehicle.eulerAngles = trafficNode.directionRight ? SCNVector3Zero : SCNVector3(x: 0, y: toRadians(angle: 180), z: 0)
+            trafficNode.addChildNode(vehicle)
+          }
+        }
       }
     }
   }
   
   func getVegitation() -> SCNNode {
     return flipIsHeads() ? Models.tree.clone() : Models.hedge.clone()
+  }
+  
+  func getVehicle(for type: Int) -> SCNNode {
+    switch type {
+    case 0:
+      return Models.car.clone()
+    case 1:
+      return Models.blueTruck.clone()
+    default:
+      return Models.firetruck.clone()
+    }
   }
 
   @available(*, unavailable)

@@ -16,6 +16,7 @@ class GameViewController: UIViewController {
   var cameraNode = SCNNode()
   var lightNode = SCNNode()
   var playerNode = SCNNode()
+  var collisionNode = CollisionNode()
   var mapNode = SCNNode()
   var lanes = [LaneNode]()
   var laneCount = 0
@@ -24,6 +25,13 @@ class GameViewController: UIViewController {
   var jumpRightAction: SCNAction?
   var jumpLeftAction: SCNAction?
   
+  var driveRightAction: SCNAction?
+  var driveLeftAction: SCNAction?
+  
+  var frontBlocked = false
+  var rightBlocked = false
+  var leftBlocked = false
+  
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScene()
@@ -31,15 +39,17 @@ class GameViewController: UIViewController {
     setupCamera()
     setupLight()
     setupPlayer()
+    setupCollisionNode()
     setupActions()
     setupGestures()
+    setupTraffic()
   }
   
   func setupScene() {
     sceneView = (view as! SCNView)
     sceneView.delegate = self
     scene = SCNScene()
-    
+    scene.physicsWorld.contactDelegate = self
     sceneView.scene = scene
     
     scene.rootNode.addChildNode(mapNode)
@@ -57,7 +67,15 @@ class GameViewController: UIViewController {
       playerNode = player
       playerNode.position = SCNVector3(0, 0.3, 0)
       scene.rootNode.addChildNode(playerNode)
+      
+      let collisionNode = CollisionNode()
+      playerNode.addChildNode(collisionNode)
     }
+  }
+  
+  func setupCollisionNode() {
+    collisionNode.position = playerNode.position
+    scene.rootNode.addChildNode(collisionNode)
   }
 
   func setupFloor() {
@@ -111,6 +129,9 @@ class GameViewController: UIViewController {
     swipeLeft.direction = .left
     sceneView.addGestureRecognizer(swipeLeft)
     
+    let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    sceneView.addGestureRecognizer(tap)
+    
   }
   
   func setupActions() {
@@ -131,12 +152,25 @@ class GameViewController: UIViewController {
     jumpForwardAction = SCNAction.group([turnForwardAction, moveForward, jumpAction])
     jumpRightAction = SCNAction.group([turnRightAction, moveRight, jumpAction])
     jumpLeftAction = SCNAction.group([turnLeftAction, moveLeft, jumpAction])
+    
+    driveRightAction = SCNAction.repeatForever(SCNAction.moveBy(x: 2.0, y: 0, z: 0, duration: 1.0))
+    driveLeftAction = SCNAction.repeatForever(SCNAction.moveBy(x: -2.0, y: 0, z: 0, duration: 1.0))
+  }
+  
+  func setupTraffic() {
+    for lane in lanes {
+      if let trafficNode = lane.trafficNode {
+        addActions(for: trafficNode)
+      }
+    }
   }
   
   func jumpForward() {
     if let action = jumpForwardAction {
       addLanes()
-      playerNode.runAction(action)
+      playerNode.runAction(action, completionHandler: {
+        self.checkBlocks()
+      })
     }
   }
   
@@ -147,6 +181,22 @@ class GameViewController: UIViewController {
     cameraNode.position.z += diffZ
     
     lightNode.position = cameraNode.position
+    
+    collisionNode.position = playerNode.position
+  }
+  
+  func updateTraffic() {
+    for lane in lanes {
+      if let trafficNode = lane.trafficNode {
+        for vehicle in trafficNode.childNodes {
+          if vehicle.position.x > 10 {
+            vehicle.position.x = -10
+          } else if vehicle.position.x < -10 {
+            vehicle.position.x = 10
+          }
+        }
+      }
+    }
   }
   
   func addLanes() {
@@ -176,32 +226,105 @@ class GameViewController: UIViewController {
     laneCount += 1
     lanes.append(lane)
     mapNode.addChildNode(lane)
+    
+    if let trafficNode = lane.trafficNode {
+      addActions(for: trafficNode)
+    }
+  }
+  
+  func addActions(for trafficNode: TrafficNode) {
+    guard let driveAction = trafficNode.directionRight ? driveRightAction : driveLeftAction else {
+      return
+    }
+    
+    driveAction.speed = 1/CGFloat(trafficNode.type + 1) + 0.5
+    
+    for vehicle in trafficNode.childNodes {
+      vehicle.runAction(driveAction)
+    }
   }
 }
+
+
 extension GameViewController: SCNSceneRendererDelegate {
   func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
     updatePositions()
+    updateTraffic()
   }
 }
+
 
 extension GameViewController {
   
   @objc func handleSwipe(_ sender: UISwipeGestureRecognizer) {
     switch sender.direction {
     case .up:
-      jumpForward()
+      if !frontBlocked {
+        jumpForward()
+      }
     case .right:
-      if playerNode.position.x < 10 {
+      if playerNode.position.x < 10 && !rightBlocked {
         if let action = jumpRightAction {
-          playerNode.runAction(action)
+          playerNode.runAction(action, completionHandler: {
+            self.checkBlocks()
+          })
         }
       }
     case .left:
-      if playerNode.position.x > -10 {
+      if playerNode.position.x > -10 && !leftBlocked {
         if let action = jumpLeftAction {
-          playerNode.runAction(action)
+          playerNode.runAction(action, completionHandler: {
+            self.checkBlocks()
+          })
         }
       }
+    default:
+      break
+    }
+  }
+  @objc func handleTap(_ sender: UITapGestureRecognizer) {
+    if sender.state == .ended {
+      if !frontBlocked {
+        jumpForward()
+      }
+    }
+  }
+  
+  func checkBlocks() {
+    // no front blocks
+    if scene.physicsWorld.contactTest(with: collisionNode.front.physicsBody!, options: nil).isEmpty {
+      frontBlocked = false
+    }
+    
+    // no right blocks
+    if scene.physicsWorld.contactTest(with: collisionNode.right.physicsBody!, options: nil).isEmpty {
+      rightBlocked = false
+    }
+    
+    // no left blocks
+    if scene.physicsWorld.contactTest(with: collisionNode.left.physicsBody!, options: nil).isEmpty {
+      leftBlocked = false
+    }
+  }
+}
+
+
+extension GameViewController: SCNPhysicsContactDelegate {
+  func physicsWorld(_ world: SCNPhysicsWorld, didBegin contact: SCNPhysicsContact) {
+    
+    guard let categoryA = contact.nodeA.physicsBody?.categoryBitMask, let categoryB = contact.nodeB.physicsBody?.categoryBitMask else { return }
+    
+    let mask = categoryA | categoryB
+    
+    switch mask {
+    case PhysicsCategory.chicken | PhysicsCategory.vehicle:
+      print("[M@] GAME OVER")
+    case PhysicsCategory.vegitation | PhysicsCategory.collisionTestFront:
+      frontBlocked = true
+    case PhysicsCategory.vegitation | PhysicsCategory.collisionTestRight:
+      rightBlocked = true
+    case PhysicsCategory.vegitation | PhysicsCategory.collisionTestLeft:
+      leftBlocked = true
     default:
       break
     }
