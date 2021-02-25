@@ -8,7 +8,7 @@
 import SceneKit
 
 enum LaneType {
-  case grass, road
+  case grass, road, plain
 }
 
 class TrafficNode: SCNNode {
@@ -36,7 +36,7 @@ class LaneNode: SCNNode {
     super.init()
 
     switch type {
-    case .grass:
+    case .grass, .plain:
       guard let texture = UIImage(named: "art.scnassets/grass.png") else {
         break
       }
